@@ -55,15 +55,22 @@ openclaw config set tools.web.search.provider gemini
 openclaw config set tools.web.search.enabled true
 
 # Slack channel
+# NOTE: do NOT set SecretRefs for Slack tokens. The outbound reply path
+# (extensions/slack/src/accounts.ts) throws on unresolved SecretRef instead
+# of falling back to the env-var path, so a reply fails even when the socket
+# connects. The default account reads SLACK_BOT_TOKEN / SLACK_APP_TOKEN
+# directly from process.env, which openclaw loads from ~/.openclaw/.env.
+# To rotate: edit ~/.openclaw/.env && openclaw gateway restart.
 openclaw config set channels.slack.enabled true
 openclaw config set channels.slack.mode socket
 openclaw config set channels.slack.dmPolicy open
 openclaw config set channels.slack.groupPolicy disabled
 openclaw config set channels.slack.capabilities.interactiveReplies true
-openclaw config set channels.slack.botToken \
-  --ref-source env --ref-provider default --ref-id SLACK_BOT_TOKEN
-openclaw config set channels.slack.appToken \
-  --ref-source env --ref-provider default --ref-id SLACK_APP_TOKEN
+# Clear any previously-set Slack token SecretRefs (idempotent).
+openclaw config unset channels.slack.botToken                   || true
+openclaw config unset channels.slack.appToken                   || true
+openclaw config unset channels.slack.accounts.default.botToken  || true
+openclaw config unset channels.slack.accounts.default.appToken  || true
 
 # Skills
 openclaw config set skills.entries.notion.apiKey \
