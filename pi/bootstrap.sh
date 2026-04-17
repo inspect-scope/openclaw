@@ -71,6 +71,13 @@ openclaw config set skills.entries.notion.apiKey \
 openclaw config set skills.entries.openai-whisper-api.apiKey \
   --ref-source env --ref-provider default --ref-id OPENAI_API_KEY
 
+# Bundled skills we want explicitly on for the Pi agent.
+# These activate automatically when their requirements are met (e.g. the
+# slack skill needs `channels.slack`, github needs the `gh` binary), but
+# pinning them to `enabled=true` prevents accidental drift.
+openclaw config set skills.entries.slack.enabled true
+openclaw config set skills.entries.github.enabled true
+
 # 5. Hooks
 openclaw config set hooks.internal.enabled true
 openclaw config set hooks.internal.entries.session-memory.enabled true
