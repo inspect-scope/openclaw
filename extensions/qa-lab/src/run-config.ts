@@ -1,4 +1,7 @@
+// Qa Lab helper module supports run config behavior.
 import path from "node:path";
+import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { defaultQaModelForMode as defaultStaticQaModelForMode } from "./model-selection.js";
 import { defaultQaRuntimeModelForMode } from "./model-selection.runtime.js";
 import {
   DEFAULT_QA_LIVE_PROVIDER_MODE,
@@ -12,7 +15,7 @@ import type { QaSeedScenario } from "./scenario-catalog.js";
 export type { QaProviderMode } from "./model-selection.js";
 export type { QaProviderModeInput } from "./providers/index.js";
 
-export type QaLabRunSelection = {
+type QaLabRunSelection = {
   providerMode: QaProviderMode;
   primaryModel: string;
   alternateModel: string;
@@ -20,14 +23,15 @@ export type QaLabRunSelection = {
   scenarioIds: string[];
 };
 
-export type QaLabRunArtifacts = {
+type QaLabRunArtifacts = {
   outputDir: string;
+  evidencePath: string;
   reportPath: string;
   summaryPath: string;
   watchUrl: string;
 };
 
-export type QaLabRunnerSnapshot = {
+type QaLabRunnerSnapshot = {
   status: "idle" | "running" | "completed" | "failed";
   selection: QaLabRunSelection;
   startedAt?: string;
@@ -40,14 +44,32 @@ export function defaultQaModelForMode(mode: QaProviderMode, alternate = false) {
   return defaultQaRuntimeModelForMode(mode, alternate ? { alternate: true } : undefined);
 }
 
-export function createDefaultQaRunSelection(scenarios: QaSeedScenario[]): QaLabRunSelection {
+type QaDefaultModelResolver = (mode: QaProviderMode, alternate?: boolean) => string;
+
+function defaultStaticModelForMode(mode: QaProviderMode, alternate = false) {
+  return defaultStaticQaModelForMode(mode, alternate ? { alternate: true } : undefined);
+}
+
+function qaLabFlowScenarioIds(scenarios: QaSeedScenario[]) {
+  return scenarios
+    .filter(
+      (scenario) => scenario.execution?.kind === undefined || scenario.execution.kind === "flow",
+    )
+    .map((scenario) => scenario.id);
+}
+
+export function createDefaultQaRunSelection(
+  scenarios: QaSeedScenario[],
+  options?: { resolveDefaultModel?: QaDefaultModelResolver },
+): QaLabRunSelection {
   const providerMode: QaProviderMode = DEFAULT_QA_LIVE_PROVIDER_MODE;
+  const resolveDefaultModel = options?.resolveDefaultModel ?? defaultQaModelForMode;
   return {
     providerMode,
-    primaryModel: defaultQaModelForMode(providerMode),
-    alternateModel: defaultQaModelForMode(providerMode, true),
+    primaryModel: resolveDefaultModel(providerMode),
+    alternateModel: resolveDefaultModel(providerMode, true),
     fastMode: true,
-    scenarioIds: scenarios.map((scenario) => scenario.id),
+    scenarioIds: qaLabFlowScenarioIds(scenarios),
   };
 }
 
@@ -68,16 +90,15 @@ function normalizeModel(input: unknown, fallback: string) {
 }
 
 function normalizeScenarioIds(input: unknown, scenarios: QaSeedScenario[]) {
-  const availableIds = new Set(scenarios.map((scenario) => scenario.id));
+  const defaultScenarioIds = qaLabFlowScenarioIds(scenarios);
+  const availableIds = new Set(defaultScenarioIds);
   const requestedIds = Array.isArray(input)
     ? input
         .map((value) => (typeof value === "string" ? value.trim() : ""))
         .filter((value) => value.length > 0)
     : [];
-  const selectedIds = requestedIds.filter((id, index) => {
-    return availableIds.has(id) && requestedIds.indexOf(id) === index;
-  });
-  return selectedIds.length > 0 ? selectedIds : scenarios.map((scenario) => scenario.id);
+  const selectedIds = uniqueStrings(requestedIds.filter((id) => availableIds.has(id)));
+  return selectedIds.length > 0 ? selectedIds : defaultScenarioIds;
 }
 
 export function normalizeQaRunSelection(
@@ -101,7 +122,9 @@ export function normalizeQaRunSelection(
 export function createIdleQaRunnerSnapshot(scenarios: QaSeedScenario[]): QaLabRunnerSnapshot {
   return {
     status: "idle",
-    selection: createDefaultQaRunSelection(scenarios),
+    selection: createDefaultQaRunSelection(scenarios, {
+      resolveDefaultModel: defaultStaticModelForMode,
+    }),
     artifacts: null,
     error: null,
   };

@@ -1,13 +1,26 @@
+// Channel setup status tests cover status text and docs link rendering.
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { withEnv, withEnvAsync } from "../test-utils/env.js";
+import {
+  makeCatalogEntry,
+  makeChannelSetupEntries,
+  makeMeta,
+} from "./channel-setup.test-helpers.js";
 
-const listChatChannels = vi.hoisted(() =>
-  vi.fn(() => [
-    { id: "discord", label: "Discord" },
-    { id: "bluebubbles", label: "BlueBubbles" },
-  ]),
-);
+type ListChatChannels = typeof import("../channels/chat-meta.js").listChatChannels;
+type ResolveChannelSetupEntries =
+  typeof import("../commands/channel-setup/discovery.js").resolveChannelSetupEntries;
+type FormatChannelPrimerLine = typeof import("../channels/registry.js").formatChannelPrimerLine;
+type FormatChannelSelectionLine =
+  typeof import("../channels/registry.js").formatChannelSelectionLine;
+type IsChannelConfigured = typeof import("../config/channel-configured.js").isChannelConfigured;
+type NoteChannelPrimerChannels = Parameters<
+  typeof import("./channel-setup.status.js").noteChannelPrimer
+>[1];
+
+const listChatChannels = vi.hoisted(() => vi.fn<ListChatChannels>(() => []));
 const resolveChannelSetupEntries = vi.hoisted(() =>
-  vi.fn(() => ({
+  vi.fn<ResolveChannelSetupEntries>(() => ({
     entries: [],
     installedCatalogEntries: [],
     installableCatalogEntries: [],
@@ -16,60 +29,83 @@ const resolveChannelSetupEntries = vi.hoisted(() =>
   })),
 );
 const formatChannelPrimerLine = vi.hoisted(() =>
-  vi.fn((meta: { label: string; blurb: string }) => `${meta.label}: ${meta.blurb}`),
+  vi.fn<FormatChannelPrimerLine>((meta) => `${meta.label}: ${meta.blurb}`),
 );
 const formatChannelSelectionLine = vi.hoisted(() =>
-  vi.fn((meta: { label: string; blurb: string }) => `${meta.label} — ${meta.blurb}`),
+  vi.fn<FormatChannelSelectionLine>((meta) => `${meta.label} — ${meta.blurb}`),
 );
-const isChannelConfigured = vi.hoisted(() => vi.fn(() => false));
+const isChannelConfigured = vi.hoisted(() => vi.fn<IsChannelConfigured>(() => false));
 
 vi.mock("../channels/chat-meta.js", () => ({
   listChatChannels: () => listChatChannels(),
 }));
 
 vi.mock("../channels/registry.js", () => ({
-  formatChannelPrimerLine: (meta: unknown) => formatChannelPrimerLine(meta),
-  formatChannelSelectionLine: (meta: unknown, docsLink: unknown) =>
-    formatChannelSelectionLine(meta, docsLink),
+  formatChannelPrimerLine: (meta: Parameters<FormatChannelPrimerLine>[0]) =>
+    formatChannelPrimerLine(meta),
+  formatChannelSelectionLine: (
+    meta: Parameters<FormatChannelSelectionLine>[0],
+    docsLink: Parameters<FormatChannelSelectionLine>[1],
+  ) => formatChannelSelectionLine(meta, docsLink),
+  normalizeAnyChannelId: (channelId?: string) => channelId?.trim().toLowerCase() ?? null,
 }));
 
 vi.mock("../commands/channel-setup/discovery.js", () => ({
-  resolveChannelSetupEntries: (params: unknown) => resolveChannelSetupEntries(params),
+  resolveChannelSetupEntries: (params: Parameters<ResolveChannelSetupEntries>[0]) =>
+    resolveChannelSetupEntries(params),
   shouldShowChannelInSetup: (meta: { exposure?: { setup?: boolean }; showInSetup?: boolean }) =>
     meta.showInSetup !== false && meta.exposure?.setup !== false,
 }));
 
 vi.mock("../config/channel-configured.js", () => ({
-  isChannelConfigured: (cfg: unknown, channelId: string) => isChannelConfigured(cfg, channelId),
+  isChannelConfigured: (
+    cfg: Parameters<IsChannelConfigured>[0],
+    channelId: Parameters<IsChannelConfigured>[1],
+  ) => isChannelConfigured(cfg, channelId),
+}));
+
+// Avoid touching the real `extensions/<id>` tree from unit tests. Status
+// rendering for installable catalog entries asks `bundled-sources` whether
+// a plugin already lives in-tree to decide between
+// "install plugin to enable" vs "bundled · enable to use". For these tests
+// we want the installable-catalog branch unconditionally, so we stub the
+// bundled lookup to "nothing is bundled".
+vi.mock("../plugins/bundled-sources.js", () => ({
+  resolveBundledPluginSources: () => new Map(),
+  findBundledPluginSourceInMap: () => undefined,
 }));
 
 import {
   collectChannelStatus,
   noteChannelPrimer,
+  noteChannelStatus,
   resolveChannelSelectionNoteLines,
   resolveChannelSetupSelectionContributions,
 } from "./channel-setup.status.js";
+
+function requireFirstMockCall<const Calls extends readonly unknown[][]>(
+  calls: Calls,
+  label: string,
+): Calls[number] {
+  const call = calls.at(0);
+  if (!call) {
+    throw new Error(`expected ${label} call`);
+  }
+  return call as Calls[number];
+}
 
 describe("resolveChannelSetupSelectionContributions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     listChatChannels.mockReturnValue([
-      { id: "discord", label: "Discord" },
-      { id: "bluebubbles", label: "BlueBubbles" },
+      makeMeta("discord", "Discord"),
+      makeMeta("imessage", "iMessage"),
     ]);
-    resolveChannelSetupEntries.mockReturnValue({
-      entries: [],
-      installedCatalogEntries: [],
-      installableCatalogEntries: [],
-      installedCatalogById: new Map(),
-      installableCatalogById: new Map(),
-    });
+    resolveChannelSetupEntries.mockReturnValue(makeChannelSetupEntries());
     formatChannelPrimerLine.mockImplementation(
       (meta: { label: string; blurb: string }) => `${meta.label}: ${meta.blurb}`,
     );
-    formatChannelSelectionLine.mockImplementation(
-      (meta: { label: string; blurb: string }) => `${meta.label} — ${meta.blurb}`,
-    );
+    formatChannelSelectionLine.mockImplementation((meta) => `${meta.label} — ${meta.blurb}`);
     isChannelConfigured.mockReturnValue(false);
   });
 
@@ -93,21 +129,21 @@ describe("resolveChannelSetupSelectionContributions", () => {
           },
         },
         {
-          id: "bluebubbles",
+          id: "imessage",
           meta: {
-            id: "bluebubbles",
-            label: "BlueBubbles",
-            selectionLabel: "BlueBubbles (macOS app)",
+            id: "imessage",
+            label: "iMessage",
+            selectionLabel: "iMessage (macOS app)",
           },
         },
-      ] as never,
+      ],
       statusByChannel: new Map(),
       resolveDisabledHint: () => undefined,
     });
 
     expect(contributions.map((contribution) => contribution.option.label)).toEqual([
-      "BlueBubbles (macOS app)",
       "Discord (Bot API)",
+      "iMessage (macOS app)",
       "Zalo (Bot API)",
     ]);
   });
@@ -121,10 +157,9 @@ describe("resolveChannelSetupSelectionContributions", () => {
             id: "zalo",
             label: "Zalo",
             selectionLabel: "Zalo (Bot API)",
-            quickstartAllowFrom: true,
           },
         },
-      ] as never,
+      ],
       statusByChannel: new Map(),
       resolveDisabledHint: () => undefined,
     });
@@ -146,10 +181,9 @@ describe("resolveChannelSetupSelectionContributions", () => {
             id: "zalo",
             label: "Zalo",
             selectionLabel: "Zalo (Bot API)",
-            quickstartAllowFrom: true,
           },
         },
-      ] as never,
+      ],
       statusByChannel: new Map([["zalo", { selectionHint: "configured" }]]),
       resolveDisabledHint: () => "disabled",
     });
@@ -171,7 +205,7 @@ describe("resolveChannelSetupSelectionContributions", () => {
             label: "Zalo\u001B[31m\nBot\u0007",
           },
         },
-      ] as never,
+      ],
       statusByChannel: new Map([["zalo", { selectionHint: "configured\u001B[2K\nnow" }]]),
       resolveDisabledHint: () => "disabled\u0007",
     });
@@ -193,7 +227,7 @@ describe("resolveChannelSetupSelectionContributions", () => {
             label: "\u001B[31m\u0007",
           },
         },
-      ] as never,
+      ],
       statusByChannel: new Map(),
       resolveDisabledHint: () => undefined,
     });
@@ -205,26 +239,13 @@ describe("resolveChannelSetupSelectionContributions", () => {
   });
 
   it("sanitizes channel labels in status note lines", async () => {
-    listChatChannels.mockReturnValue([{ id: "discord", label: "Discord\u001B[31m\nCore\u0007" }]);
-    resolveChannelSetupEntries.mockReturnValue({
-      entries: [],
-      installedCatalogEntries: [
-        {
-          id: "matrix",
-          pluginId: "matrix",
-          meta: { id: "matrix", label: "Matrix\u001B[2K\nPlugin\u0007" },
-        },
-      ],
-      installableCatalogEntries: [
-        {
-          id: "zalo",
-          pluginId: "zalo",
-          meta: { id: "zalo", label: "Zalo\u001B[2K\nPlugin\u0007" },
-        },
-      ],
-      installedCatalogById: new Map(),
-      installableCatalogById: new Map(),
-    });
+    listChatChannels.mockReturnValue([makeMeta("discord", "Discord\u001B[31m\nCore\u0007")]);
+    resolveChannelSetupEntries.mockReturnValue(
+      makeChannelSetupEntries({
+        installedCatalogEntries: [makeCatalogEntry("matrix", "Matrix\u001B[2K\nPlugin\u0007")],
+        installableCatalogEntries: [makeCatalogEntry("zalo", "Zalo\u001B[2K\nPlugin\u0007")],
+      }),
+    );
 
     const summary = await collectChannelStatus({
       cfg: {} as never,
@@ -239,6 +260,51 @@ describe("resolveChannelSetupSelectionContributions", () => {
     ]);
   });
 
+  it("localizes channel status note labels", async () => {
+    listChatChannels.mockReturnValue([
+      makeMeta("discord", "Discord"),
+      makeMeta("telegram", "Telegram"),
+    ]);
+    isChannelConfigured.mockImplementation((_, channelId) => channelId === "discord");
+    resolveChannelSetupEntries.mockReturnValue(
+      makeChannelSetupEntries({
+        installedCatalogEntries: [makeCatalogEntry("matrix", "Matrix")],
+        installableCatalogEntries: [makeCatalogEntry("zalo", "Zalo")],
+      }),
+    );
+
+    await withEnvAsync({ OPENCLAW_LOCALE: "zh-CN" }, async () => {
+      const summary = await collectChannelStatus({
+        cfg: {} as never,
+        accountOverrides: {},
+        installedPlugins: [],
+      });
+
+      expect(summary.statusLines).toEqual([
+        "Discord: 已配置（插件已禁用）",
+        "Telegram: 未配置",
+        "Matrix: 已安装",
+        "Zalo: 安装插件后启用",
+      ]);
+    });
+  });
+
+  it("localizes channel status note title", async () => {
+    const note = vi.fn(async () => {});
+    listChatChannels.mockReturnValue([makeMeta("discord", "Discord")]);
+    isChannelConfigured.mockReturnValue(true);
+
+    await withEnvAsync({ OPENCLAW_LOCALE: "zh-CN" }, async () => {
+      await noteChannelStatus({
+        cfg: {} as never,
+        prompter: { note } as never,
+        installedPlugins: [],
+      });
+
+      expect(note).toHaveBeenCalledWith(expect.any(String), "频道状态");
+    });
+  });
+
   it("sanitizes channel metadata before primer notes", async () => {
     const note = vi.fn(async () => undefined);
 
@@ -249,46 +315,78 @@ describe("resolveChannelSetupSelectionContributions", () => {
           id: "bad\u001B[31m\nid",
           label: "\u001B[31m\u0007",
           blurb: "Blurb\u001B[2K\nline\u0007",
-        },
-      ] as never,
+        } satisfies NoteChannelPrimerChannels[number],
+      ] as NoteChannelPrimerChannels,
     );
 
-    expect(formatChannelPrimerLine).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "bad\\nid",
-        label: "bad\\nid",
-        selectionLabel: "bad\\nid",
-        blurb: "Blurb\\nline",
-      }),
-    );
+    expect(formatChannelPrimerLine).toHaveBeenCalledOnce();
+    const [primerMeta] = requireFirstMockCall(formatChannelPrimerLine.mock.calls, "primer line");
+    expect(primerMeta?.id).toBe("bad\\nid");
+    expect(primerMeta?.label).toBe("bad\\nid");
+    expect(primerMeta?.selectionLabel).toBe("bad\\nid");
+    expect(primerMeta?.blurb).toBe("Blurb\\nline");
     expect(note).toHaveBeenCalledWith(
-      expect.stringContaining("bad\\nid: Blurb\\nline"),
+      [
+        "Inbound DM safety defaults to pairing: unknown senders get a pairing code first.",
+        "Approve with: openclaw pairing approve <channel> <code>",
+        'Open/public DMs require dmPolicy="open" plus allowFrom=["*"].',
+        'For multi-user DMs, isolate sessions with: openclaw config set session.dmScope "per-channel-peer" (or "per-account-channel-peer" for multi-account channels).',
+        "Docs: https://docs.openclaw.ai/channels/pairing",
+        "",
+        "bad\\nid: Blurb\\nline",
+      ].join("\n"),
       "How channels work",
     );
   });
 
-  it("sanitizes channel metadata before selection notes", () => {
-    resolveChannelSetupEntries.mockReturnValue({
-      entries: [
-        {
-          id: "zalo",
-          meta: {
-            id: "zalo",
-            label: "Zalo\u001B[31m\nBot\u0007",
-            selectionLabel: "Zalo",
-            docsPath: "/channels/zalo",
-            docsLabel: "Docs\u001B[2K\nLabel",
-            blurb: "Setup\u001B[2K\nhelp\u0007",
-            selectionDocsPrefix: "Docs\u001B[2K\nPrefix",
-            selectionExtras: ["Extra\u001B[2K\nOne", "\u001B[31m\u0007"],
-          },
-        },
-      ],
-      installedCatalogEntries: [],
-      installableCatalogEntries: [],
-      installedCatalogById: new Map(),
-      installableCatalogById: new Map(),
+  it("localizes built-in channel primer copy", async () => {
+    const note = vi.fn(async () => undefined);
+
+    await withEnvAsync({ OPENCLAW_LOCALE: "zh-CN" }, async () => {
+      await noteChannelPrimer(
+        { note } as never,
+        [
+          {
+            id: "discord",
+            label: "Discord",
+            blurb: "very well supported right now.",
+          } satisfies NoteChannelPrimerChannels[number],
+        ] as NoteChannelPrimerChannels,
+      );
     });
+
+    expect(formatChannelPrimerLine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        label: "Discord",
+        blurb: "目前支持很完善。",
+      }),
+    );
+    expect(note).toHaveBeenCalledWith(
+      expect.stringContaining("入站 DM 安全默认使用配对"),
+      "频道工作方式",
+    );
+  });
+
+  it("sanitizes channel metadata before selection notes", () => {
+    resolveChannelSetupEntries.mockReturnValue(
+      makeChannelSetupEntries({
+        entries: [
+          {
+            id: "zalo",
+            meta: {
+              id: "zalo",
+              label: "Zalo\u001B[31m\nBot\u0007",
+              selectionLabel: "Zalo",
+              docsPath: "/channels/zalo",
+              docsLabel: "Docs\u001B[2K\nLabel",
+              blurb: "Setup\u001B[2K\nhelp\u0007",
+              selectionDocsPrefix: "Docs\u001B[2K\nPrefix",
+              selectionExtras: ["Extra\u001B[2K\nOne", "\u001B[31m\u0007"],
+            },
+          },
+        ],
+      }),
+    );
 
     const lines = resolveChannelSelectionNoteLines({
       cfg: {} as never,
@@ -296,16 +394,58 @@ describe("resolveChannelSetupSelectionContributions", () => {
       selection: ["zalo"],
     });
 
-    expect(formatChannelSelectionLine).toHaveBeenCalledWith(
-      expect.objectContaining({
-        label: "Zalo\\nBot",
-        blurb: "Setup\\nhelp",
-        docsLabel: "Docs\\nLabel",
-        selectionDocsPrefix: "Docs\\nPrefix",
-        selectionExtras: ["Extra\\nOne"],
-      }),
-      expect.any(Function),
+    expect(formatChannelSelectionLine).toHaveBeenCalledOnce();
+    const [selectionMeta, docsLink] = requireFirstMockCall(
+      formatChannelSelectionLine.mock.calls,
+      "selection line",
     );
+    expect(selectionMeta?.label).toBe("Zalo\\nBot");
+    expect(selectionMeta?.blurb).toBe("Setup\\nhelp");
+    expect(selectionMeta?.docsLabel).toBe("Docs\\nLabel");
+    expect(selectionMeta?.selectionDocsPrefix).toBe("Docs\\nPrefix");
+    expect(selectionMeta?.selectionExtras).toEqual(["Extra\\nOne"]);
+    if (typeof docsLink !== "function") {
+      throw new Error("Expected docs link formatter");
+    }
+    expect(docsLink("/channels/zalo", "Docs")).toBe("https://docs.openclaw.ai/channels/zalo");
     expect(lines).toEqual(["Zalo\\nBot — Setup\\nhelp"]);
+  });
+
+  it("localizes built-in channel blurbs before selection notes", () => {
+    resolveChannelSetupEntries.mockReturnValue(
+      makeChannelSetupEntries({
+        entries: [
+          {
+            id: "feishu",
+            meta: {
+              id: "feishu",
+              label: "Feishu",
+              selectionLabel: "Feishu",
+              docsPath: "/channels/feishu",
+              docsLabel: "feishu",
+              blurb: "飞书/Lark enterprise messaging.",
+            },
+          },
+        ],
+      }),
+    );
+
+    withEnv({ OPENCLAW_LOCALE: "zh-CN" }, () => {
+      const lines = resolveChannelSelectionNoteLines({
+        cfg: {} as never,
+        installedPlugins: [],
+        selection: ["feishu"],
+      });
+
+      expect(formatChannelSelectionLine).toHaveBeenCalledWith(
+        expect.objectContaining({
+          label: "Feishu",
+          blurb: "飞书/Lark 企业消息。",
+          selectionDocsPrefix: "文档：",
+        }),
+        expect.any(Function),
+      );
+      expect(lines).toEqual(["Feishu — 飞书/Lark 企业消息。"]);
+    });
   });
 });

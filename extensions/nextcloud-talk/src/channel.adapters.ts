@@ -1,3 +1,4 @@
+// Nextcloud Talk plugin module implements channel.adapters behavior.
 import { formatAllowFromLowercase } from "openclaw/plugin-sdk/allow-from";
 import {
   adaptScopedAccountAccessor,
@@ -5,6 +6,7 @@ import {
   createScopedDmSecurityResolver,
 } from "openclaw/plugin-sdk/channel-config-helpers";
 import { createPairingPrefixStripper } from "openclaw/plugin-sdk/channel-pairing";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   listNextcloudTalkAccountIds,
   resolveDefaultNextcloudTalkAccountId,
@@ -12,10 +14,6 @@ import {
   type ResolvedNextcloudTalkAccount,
 } from "./accounts.js";
 import type { CoreConfig } from "./types.js";
-
-function normalizeLowercaseStringOrEmpty(value: unknown): string {
-  return typeof value === "string" ? value.trim().toLowerCase() : "";
-}
 
 export const nextcloudTalkConfigAdapter = createScopedChannelConfigAdapter<
   ResolvedNextcloudTalkAccount,
