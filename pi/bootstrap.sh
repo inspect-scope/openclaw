@@ -63,7 +63,13 @@ openclaw config set tools.web.search.enabled true
 # To rotate: edit ~/.openclaw/.env && openclaw gateway restart.
 openclaw config set channels.slack.enabled true
 openclaw config set channels.slack.mode socket
-openclaw config set channels.slack.dmPolicy open
+# Lock the bot to a single Slack user. dmPolicy=allowlist gates every DM
+# through channels.slack.allowFrom (see extensions/slack/src/monitor/dm-auth.ts):
+# only IDs in allowFrom are admitted, everyone else is rejected (no pairing).
+# Match by stable user ID, not name, so a display-name change can't grant access.
+openclaw config set channels.slack.dmPolicy allowlist
+openclaw config set channels.slack.allowFrom '["U07DZRW5PK2"]'
+openclaw config set channels.slack.allowNameMatching false
 openclaw config set channels.slack.groupPolicy disabled
 openclaw config set channels.slack.capabilities.interactiveReplies true
 # Clear any previously-set Slack token SecretRefs (idempotent).
