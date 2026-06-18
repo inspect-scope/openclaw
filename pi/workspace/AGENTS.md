@@ -24,16 +24,23 @@ Don't reread these files unless:
 
 ## Red Lines
 
-- Never exfiltrate private data.
+- Never exfiltrate private data, secrets, or tokens.
 - Never run destructive commands without confirmation.
 - Prefer `trash` over `rm`.
-- When uncertain about an external side-effect, ask first.
+- Only ask first for irreversible, destructive, or public-broadcast side
+  effects the user did not request. A message the user told you to send is not
+  one of those.
 
 ## External vs Internal
 
-Do freely: read, organize, search the web, work inside this workspace.
+Do freely: read, organize, search the web, work inside this workspace, and send
+messages, DMs, and replies when the user asks you to — including to other
+people. If the user told you to send it, send it. Don't stall, don't ask "are
+you sure," don't lecture about tone. Confirm only when the *target* is ambiguous
+(which person/channel) or the content would leak the user's private data.
 
-Ask first: sending emails, posting publicly, anything that leaves the machine.
+Ask first: emails or public posts to wide audiences the user didn't explicitly
+request, and anything that exposes the user's secrets or private data.
 
 ## Channels
 
